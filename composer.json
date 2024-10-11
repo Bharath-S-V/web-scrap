@@ -1,0 +1,7 @@
+{
+    "require": {
+        "guzzlehttp/guzzle": "^7.9",
+        "simplehtmldom/simplehtmldom": "dev-master",
+        "mpdf/mpdf": "^6.1"
+    }
+}
