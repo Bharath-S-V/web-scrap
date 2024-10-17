@@ -78,26 +78,71 @@ require 'vendor/simplehtmldom/simplehtmldom/simple_html_dom.php'; // Adjust the 
                 exit;
             }
 
-            // Load the website's HTML using cURL
+            // Load the website's HTML using cURL with additional headers
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $url);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
             curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36');
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'Referer: https://google.com',
+                'Accept-Language: en-US,en;q=0.9',
+                'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Connection: keep-alive'
+            ]);
 
             // Execute the request
             $htmlContent = curl_exec($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_errno($ch);
             curl_close($ch);
 
-            if ($httpCode !== 200) {
-                echo '<div class="alert alert-danger">Failed to retrieve the website. HTTP Status Code: ' . $httpCode . '</div>';
+            // Handle HTTP errors or cURL errors
+            if ($httpCode == 403 || $httpCode == 999 || $httpCode == 0) {
+                // Log the error
+                $errorMessage = "Failed to retrieve the website. HTTP Status Code: $httpCode. ";
+                if ($curlError) {
+                    $errorMessage .= "cURL Error: " . curl_strerror($curlError);
+                }
+
+                // Save the error to CSV for future analysis
+                $parsedUrl = parse_url($url);
+                $domainName = str_replace(['www.', '.'], '_', $parsedUrl['host']);
+                $timestamp = date('Ymd_His');
+                $csvFileName = $domainName . '_error_log_' . $timestamp . '.csv';
+
+                $errorLog = [
+                    ['URL', $url],
+                    ['HTTP Status Code', $httpCode],
+                    ['Error Message', $errorMessage],
+                    ['Timestamp', $timestamp],
+                ];
+
+                $file = fopen($csvFileName, 'w');
+                foreach ($errorLog as $row) {
+                    fputcsv($file, $row);
+                }
+                fclose($file);
+
+                // Display the error and download link for CSV
+                echo '<div class="alert alert-danger">' . $errorMessage . '</div>';
+                echo "<h3>Download Error Log as CSV:</h3>";
+                echo "<a href='$csvFileName' download='$csvFileName' class='btn btn-danger'>Download Error Log</a>";
                 exit;
             }
 
             // Create a new simple_html_dom instance
             $html = str_get_html($htmlContent);
 
+            // Parse the domain name from the URL to dynamically generate a CSV filename
+            $parsedUrl = parse_url($url);
+            $domainName = str_replace(['www.', '.'], '_', $parsedUrl['host']);
+
+            // Set a timestamp to avoid file overwriting
+            $timestamp = date('Ymd_His');
+            $csvFileName = $domainName . '_scraped_data_' . $timestamp . '.csv';
+
+            // Scrape the data
             $pageTitle = isset($html->find('title', 0)->innertext) ? $html->find('title', 0)->innertext : 'Not found';
             $metaDescription = isset($html->find('meta[name=description]', 0)->content) ? $html->find('meta[name=description]', 0)->content : 'Not found';
             $metaKeywords = isset($html->find('meta[name=keywords]', 0)->content) ? $html->find('meta[name=keywords]', 0)->content : 'Not found';
@@ -113,10 +158,6 @@ require 'vendor/simplehtmldom/simplehtmldom/simple_html_dom.php'; // Adjust the 
                 }
             }
 
-            // Parse the domain name from the URL to handle relative image URLs
-            $parsedUrl = parse_url($url);
-            $baseUrl = $parsedUrl['scheme'] . '://' . $parsedUrl['host'];
-
             // All Image alt attributes with proper handling of relative URLs
             $images = [];
             foreach ($html->find('img') as $img) {
@@ -124,7 +165,7 @@ require 'vendor/simplehtmldom/simplehtmldom/simple_html_dom.php'; // Adjust the 
 
                 // Check if the image URL is relative, and convert to absolute if necessary
                 if (strpos($src, 'http') === false) {
-                    $src = (strpos($src, '/') === 0 ? $baseUrl : $baseUrl . '/') . ltrim($src, '/');
+                    $src = (strpos($src, '/') === 0 ? $parsedUrl['scheme'] . '://' . $parsedUrl['host'] : $parsedUrl['scheme'] . '://' . $parsedUrl['host'] . '/') . ltrim($src, '/');
                 }
 
                 $altText = $img->alt ?: 'No alt attribute';
@@ -149,17 +190,14 @@ require 'vendor/simplehtmldom/simplehtmldom/simple_html_dom.php'; // Adjust the 
                 $csvData[] = ['Image', $img];
             }
 
-            // Create the CSV file and provide download link
-            $csvFileName = 'scraped_data.csv';
+            // Create the CSV file and write the data
             $file = fopen($csvFileName, 'w');
-
             foreach ($csvData as $row) {
                 fputcsv($file, $row);
             }
-
             fclose($file);
 
-            // Display the scraped data
+            // Display the scraped data and provide the download link
             echo "<div class='scraped-data'>";
             echo "<h2 class='mt-4'>Scraped Data from: $url</h2>";
             echo "<p><strong>Page Title:</strong> $pageTitle</p>";
@@ -181,9 +219,9 @@ require 'vendor/simplehtmldom/simplehtmldom/simple_html_dom.php'; // Adjust the 
             foreach ($images as $img) {
                 list($src, $altText) = explode(' - ', $img);
                 echo "<div class='col-md-4 mb-4'>
-                    <img src='$src' alt='$altText' class='img-fluid'>
-                    <p><strong>Alt:</strong> $altText</p>
-                  </div>";
+            <img src='$src' alt='$altText' class='img-fluid'>
+            <p><strong>Alt:</strong> $altText</p>
+          </div>";
             }
             echo "</div>";
 
@@ -195,6 +233,8 @@ require 'vendor/simplehtmldom/simplehtmldom/simple_html_dom.php'; // Adjust the 
             echo '<div class="alert alert-warning">No URL provided.</div>';
         }
         ?>
+
+
     </div>
 
     <footer>
